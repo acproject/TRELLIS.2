@@ -1,5 +1,7 @@
 import os
+os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '1'
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # Can save GPU memory
+os.environ['SDPA_BACKEND'] = 'cudnn'
 import trimesh
 from PIL import Image
 from trellis2.pipelines import Trellis2TexturingPipeline

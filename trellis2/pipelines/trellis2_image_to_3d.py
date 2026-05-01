@@ -124,6 +124,53 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if self.rembg_model is not None:
                 self.rembg_model.to(device)
 
+    def to_multi_gpu(self, devices: list) -> None:
+        """
+        Distribute models across multiple GPUs to save VRAM per GPU.
+
+        Args:
+            devices (list): List of device strings, e.g. ['cuda:0', 'cuda:1'].
+                            Models will be distributed round-robin across these devices.
+        """
+        self._multi_gpu = True
+        self._devices = devices
+        self._device = devices[0]
+        self._model_devices = {}
+
+        all_items = [
+            ('image_cond_model', self.image_cond_model),
+            ('rembg_model', self.rembg_model),
+        ] + list(self.models.items())
+
+        for i, (name, model) in enumerate(all_items):
+            if model is None:
+                continue
+            target_device = devices[i % len(devices)]
+            model.to(target_device)
+            self._model_devices[name] = target_device
+
+        self.low_vram = False
+
+    def _get_device_of_model(self, model) -> str:
+        if hasattr(self, '_multi_gpu') and self._multi_gpu:
+            try:
+                return next(model.parameters()).device
+            except StopIteration:
+                return self._device
+        return self._device
+
+    def _move_to_device(self, data, device):
+        if isinstance(data, torch.Tensor):
+            return data.to(device)
+        elif isinstance(data, SparseTensor):
+            return data.to(device)
+        elif isinstance(data, dict):
+            return {k: self._move_to_device(v, device) for k, v in data.items()}
+        elif isinstance(data, (list, tuple)):
+            moved = [self._move_to_device(item, device) for item in data]
+            return type(data)(moved)
+        return data
+
     def preprocess_image(self, input: Image.Image) -> Image.Image:
         """
         Preprocess the input image.
@@ -143,7 +190,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         else:
             input = input.convert('RGB')
             if self.low_vram:
-                self.rembg_model.to(self.device)
+                self.rembg_model.to(self._get_device_of_model(self.rembg_model))
             output = self.rembg_model(input)
             if self.low_vram:
                 self.rembg_model.cpu()
@@ -173,7 +220,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         """
         self.image_cond_model.image_size = resolution
         if self.low_vram:
-            self.image_cond_model.to(self.device)
+            self.image_cond_model.to(self._get_device_of_model(self.image_cond_model))
         cond = self.image_cond_model(image)
         if self.low_vram:
             self.image_cond_model.cpu()
@@ -205,10 +252,12 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         flow_model = self.models['sparse_structure_flow_model']
         reso = flow_model.resolution
         in_channels = flow_model.in_channels
-        noise = torch.randn(num_samples, in_channels, reso, reso, reso).to(self.device)
+        target_device = self._get_device_of_model(flow_model)
+        noise = torch.randn(num_samples, in_channels, reso, reso, reso).to(target_device)
+        cond = self._move_to_device(cond, target_device)
         sampler_params = {**self.sparse_structure_sampler_params, **sampler_params}
         if self.low_vram:
-            flow_model.to(self.device)
+            flow_model.to(target_device)
         z_s = self.sparse_structure_sampler.sample(
             flow_model,
             noise,
@@ -222,8 +271,10 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         
         # Decode sparse structure latent
         decoder = self.models['sparse_structure_decoder']
+        target_device = self._get_device_of_model(decoder)
+        z_s = z_s.to(target_device)
         if self.low_vram:
-            decoder.to(self.device)
+            decoder.to(target_device)
         decoded = decoder(z_s)>0
         if self.low_vram:
             decoder.cpu()
@@ -250,13 +301,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # Sample structured latent
+        target_device = self._get_device_of_model(flow_model)
         noise = SparseTensor(
-            feats=torch.randn(coords.shape[0], flow_model.in_channels).to(self.device),
-            coords=coords,
+            feats=torch.randn(coords.shape[0], flow_model.in_channels).to(target_device),
+            coords=coords.to(target_device),
         )
+        cond = self._move_to_device(cond, target_device)
         sampler_params = {**self.shape_slat_sampler_params, **sampler_params}
         if self.low_vram:
-            flow_model.to(self.device)
+            flow_model.to(target_device)
         slat = self.shape_slat_sampler.sample(
             flow_model,
             noise,
@@ -295,13 +348,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # LR
+        target_device = self._get_device_of_model(flow_model_lr)
         noise = SparseTensor(
-            feats=torch.randn(coords.shape[0], flow_model_lr.in_channels).to(self.device),
-            coords=coords,
+            feats=torch.randn(coords.shape[0], flow_model_lr.in_channels).to(target_device),
+            coords=coords.to(target_device),
         )
+        lr_cond = self._move_to_device(lr_cond, target_device)
         sampler_params = {**self.shape_slat_sampler_params, **sampler_params}
         if self.low_vram:
-            flow_model_lr.to(self.device)
+            flow_model_lr.to(target_device)
         slat = self.shape_slat_sampler.sample(
             flow_model_lr,
             noise,
@@ -317,13 +372,16 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         slat = slat * std + mean
         
         # Upsample
+        shape_decoder = self.models['shape_slat_decoder']
+        target_device = self._get_device_of_model(shape_decoder)
+        slat = self._move_to_device(slat, target_device)
         if self.low_vram:
-            self.models['shape_slat_decoder'].to(self.device)
-            self.models['shape_slat_decoder'].low_vram = True
-        hr_coords = self.models['shape_slat_decoder'].upsample(slat, upsample_times=4)
+            shape_decoder.to(target_device)
+            shape_decoder.low_vram = True
+        hr_coords = shape_decoder.upsample(slat, upsample_times=4)
         if self.low_vram:
-            self.models['shape_slat_decoder'].cpu()
-            self.models['shape_slat_decoder'].low_vram = False
+            shape_decoder.cpu()
+            shape_decoder.low_vram = False
         hr_resolution = resolution
         while True:
             quant_coords = torch.cat([
@@ -339,13 +397,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             hr_resolution -= 128
         
         # Sample structured latent
+        target_device = self._get_device_of_model(flow_model)
         noise = SparseTensor(
-            feats=torch.randn(coords.shape[0], flow_model.in_channels).to(self.device),
-            coords=coords,
+            feats=torch.randn(coords.shape[0], flow_model.in_channels).to(target_device),
+            coords=coords.to(target_device),
         )
+        cond = self._move_to_device(cond, target_device)
         sampler_params = {**self.shape_slat_sampler_params, **sampler_params}
         if self.low_vram:
-            flow_model.to(self.device)
+            flow_model.to(target_device)
         slat = self.shape_slat_sampler.sample(
             flow_model,
             noise,
@@ -378,14 +438,17 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             List[Mesh]: The decoded meshes.
             List[SparseTensor]: The decoded substructures.
         """
-        self.models['shape_slat_decoder'].set_resolution(resolution)
+        shape_decoder = self.models['shape_slat_decoder']
+        target_device = self._get_device_of_model(shape_decoder)
+        slat = self._move_to_device(slat, target_device)
+        shape_decoder.set_resolution(resolution)
         if self.low_vram:
-            self.models['shape_slat_decoder'].to(self.device)
-            self.models['shape_slat_decoder'].low_vram = True
-        ret = self.models['shape_slat_decoder'](slat, return_subs=True)
+            shape_decoder.to(target_device)
+            shape_decoder.low_vram = True
+        ret = shape_decoder(slat, return_subs=True)
         if self.low_vram:
-            self.models['shape_slat_decoder'].cpu()
-            self.models['shape_slat_decoder'].low_vram = False
+            shape_decoder.cpu()
+            shape_decoder.low_vram = False
         return ret
     
     def sample_tex_slat(
@@ -404,15 +467,18 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # Sample structured latent
+        target_device = self._get_device_of_model(flow_model)
+        shape_slat = self._move_to_device(shape_slat, target_device)
         std = torch.tensor(self.shape_slat_normalization['std'])[None].to(shape_slat.device)
         mean = torch.tensor(self.shape_slat_normalization['mean'])[None].to(shape_slat.device)
         shape_slat = (shape_slat - mean) / std
 
         in_channels = flow_model.in_channels if isinstance(flow_model, nn.Module) else flow_model[0].in_channels
-        noise = shape_slat.replace(feats=torch.randn(shape_slat.coords.shape[0], in_channels - shape_slat.feats.shape[1]).to(self.device))
+        noise = shape_slat.replace(feats=torch.randn(shape_slat.coords.shape[0], in_channels - shape_slat.feats.shape[1]).to(target_device))
+        cond = self._move_to_device(cond, target_device)
         sampler_params = {**self.tex_slat_sampler_params, **sampler_params}
         if self.low_vram:
-            flow_model.to(self.device)
+            flow_model.to(target_device)
         slat = self.tex_slat_sampler.sample(
             flow_model,
             noise,
@@ -445,11 +511,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         Returns:
             SparseTensor: The decoded texture voxels
         """
+        tex_decoder = self.models['tex_slat_decoder']
+        target_device = self._get_device_of_model(tex_decoder)
+        slat = self._move_to_device(slat, target_device)
+        subs = self._move_to_device(subs, target_device)
         if self.low_vram:
-            self.models['tex_slat_decoder'].to(self.device)
-        ret = self.models['tex_slat_decoder'](slat, guide_subs=subs) * 0.5 + 0.5
+            tex_decoder.to(target_device)
+        ret = tex_decoder(slat, guide_subs=subs) * 0.5 + 0.5
         if self.low_vram:
-            self.models['tex_slat_decoder'].cpu()
+            tex_decoder.cpu()
         return ret
     
     @torch.no_grad()
