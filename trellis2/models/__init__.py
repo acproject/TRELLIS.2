@@ -66,13 +66,3 @@ def from_pretrained(path: str, **kwargs):
     model.load_state_dict(load_file(model_file), strict=False)
 
     return model
-
-
-# For Pylance
-if __name__ == '__main__':
-    from .sparse_structure_vae import SparseStructureEncoder, SparseStructureDecoder
-    from .sparse_structure_flow import SparseStructureFlowModel
-    from .structured_latent_flow import SLatFlowModel, ElasticSLatFlowModel
-        
-    from .sc_vaes.sparse_unet_vae import SparseUnetVaeEncoder, SparseUnetVaeDecoder
-    from .sc_vaes.fdg_vae import FlexiDualGridVaeEncoder, FlexiDualGridVaeDecoder

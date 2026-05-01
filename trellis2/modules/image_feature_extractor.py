@@ -2,7 +2,6 @@ from typing import *
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from transformers import DINOv3ViTModel
 import numpy as np
 from PIL import Image
 
@@ -60,9 +59,17 @@ class DinoV3FeatureExtractor:
     """
     Feature extractor for DINOv3 models.
     """
-    def __init__(self, model_name: str, image_size=512):
+    def __init__(self, model_name: str, image_size=512, local_files_only=False):
         self.model_name = model_name
-        self.model = DINOv3ViTModel.from_pretrained(model_name)
+        if local_files_only:
+            from modelscope import snapshot_download
+            model_path = snapshot_download(model_name, local_files_only=True)
+        else:
+            from modelscope import snapshot_download
+            model_path = snapshot_download(model_name)
+        
+        from transformers import DINOv3ViTModel
+        self.model = DINOv3ViTModel.from_pretrained(model_path)
         self.model.eval()
         self.image_size = image_size
         self.transform = transforms.Compose([
