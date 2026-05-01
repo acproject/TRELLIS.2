@@ -2,7 +2,7 @@ from typing import *
 
 CONV = 'flex_gemm' 
 DEBUG = False
-ATTN = 'flash_attn'
+ATTN = 'sdpa'
 
 def __from_env():
     import os
@@ -21,7 +21,7 @@ def __from_env():
         CONV = env_sparse_conv_backend
     if env_sparse_debug is not None:
         DEBUG = env_sparse_debug == '1'
-    if env_sparse_attn_backend is not None and env_sparse_attn_backend in ['xformers', 'flash_attn', 'flash_attn_3']:
+    if env_sparse_attn_backend is not None and env_sparse_attn_backend in ['xformers', 'flash_attn', 'flash_attn_3', 'sdpa']:
         ATTN = env_sparse_attn_backend
         
     print(f"[SPARSE] Conv backend: {CONV}; Attention backend: {ATTN}")
@@ -38,6 +38,6 @@ def set_debug(debug: bool):
     global DEBUG
     DEBUG = debug
 
-def set_attn_backend(backend: Literal['xformers', 'flash_attn']):
+def set_attn_backend(backend: Literal['xformers', 'flash_attn', 'flash_attn_3', 'sdpa']):
     global ATTN
     ATTN = backend

@@ -55,6 +55,10 @@ def calc_window_partition(
         attn_func_args = {
             'attn_bias': xops.fmha.BlockDiagonalMask.from_seqlens(seq_lens)
         }
+    elif config.ATTN == 'sdpa':
+        attn_func_args = {
+            'seq_lens': seq_lens
+        }
     elif config.ATTN == 'flash_attn':
         attn_func_args = {
             'cu_seqlens': torch.cat([torch.tensor([0], device=tensor.device), torch.cumsum(seq_lens, dim=0)], dim=0).int(),
@@ -109,6 +113,27 @@ def sparse_windowed_scaled_dot_product_self_attention(
         k = k.unsqueeze(0)                                                              # [1, M, H, C]
         v = v.unsqueeze(0)                                                              # [1, M, H, C]
         out = xops.memory_efficient_attention(q, k, v, **attn_func_args)[0]             # [M, H, C]
+    elif config.ATTN == 'sdpa':
+        import torch.nn.functional as F
+        q, k, v = qkv_feats.unbind(dim=1)                                               # [M, H, C]
+        H = q.shape[-2]
+        C = q.shape[-1]
+        seq_lens = attn_func_args['seq_lens']
+        batch_size = len(seq_lens)
+        max_len = max(seq_lens)
+        attn_mask = torch.zeros(batch_size, max_len, max_len, device=qkv_feats.device, dtype=q.dtype)
+        start = 0
+        for i in range(batch_size):
+            seq_len = seq_lens[i]
+            attn_mask[i, :seq_len, :seq_len] = 1
+            start += seq_len
+        q = q.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
+        k = k.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
+        v = v.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
+        attn_mask = attn_mask.unsqueeze(1).repeat(1, H, 1, 1)
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf'))
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        out = out.permute(0, 2, 1, 3).reshape(-1, H, C)
     elif config.ATTN == 'flash_attn':
         if 'flash_attn' not in globals():
             import flash_attn
@@ -177,6 +202,24 @@ def sparse_windowed_scaled_dot_product_cross_attention(
         v = v.unsqueeze(0)                                                              # [1, M, H, C]
         mask = xops.fmha.BlockDiagonalMask.from_seqlens(q_seq_lens, kv_seq_lens)
         out = xops.memory_efficient_attention(q, k, v, attn_bias=mask)[0]               # [M, H, C]
+    elif config.ATTN == 'sdpa':
+        import torch.nn.functional as F
+        k, v = kv_feats.unbind(dim=1)                                                   # [M, H, C]
+        H = q_feats.shape[-2]
+        CO = v.shape[-1]
+        batch_size = len(q_seq_lens)
+        max_q_len = max(q_seq_lens)
+        max_kv_len = max(kv_seq_lens)
+        attn_mask = torch.zeros(batch_size, max_q_len, max_kv_len, device=q_feats.device, dtype=q_feats.dtype)
+        for i in range(batch_size):
+            attn_mask[i, :q_seq_lens[i], :kv_seq_lens[i]] = 1
+        q = q_feats.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
+        k = k.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
+        v = v.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
+        attn_mask = attn_mask.unsqueeze(1).repeat(1, H, 1, 1)
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf'))
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        out = out.permute(0, 2, 1, 3).reshape(-1, H, CO)
     elif config.ATTN == 'flash_attn':
         if 'flash_attn' not in globals():
             import flash_attn
