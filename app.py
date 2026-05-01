@@ -3,6 +3,8 @@ import gradio as gr
 import os
 os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '1'
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+import os
+os.environ['SDPA_BACKEND'] = 'cudnn'
 from datetime import datetime
 import shutil
 import cv2
