@@ -93,7 +93,7 @@ class SparseMultiHeadAttention(nn.Module):
             x_feats = x.feats.unsqueeze(0)
         else:
             x_feats = x
-        x_feats = x_feats.reshape(*x_feats.shape[:2], num_fused, self.num_heads, -1)
+        x_feats = x_feats.reshape(*x_feats.shape[:2], num_fused, self.num_heads, self.head_dim)
         return x.replace(x_feats.squeeze(0)) if isinstance(x, VarLenTensor) else x_feats
     
     def forward(self, x: SparseTensor, context: Optional[Union[VarLenTensor, torch.Tensor]] = None) -> SparseTensor:
@@ -126,7 +126,7 @@ class SparseMultiHeadAttention(nn.Module):
                 h = qkv.replace(torch.cat([h0.feats, h1.feats], dim=1))
         else:
             q = self._linear(self.to_q, x)
-            q = self._reshape_chs(q, (self.num_heads, -1))
+            q = self._reshape_chs(q, (self.num_heads, self.head_dim))
             kv = self._linear(self.to_kv, context)
             kv = self._fused_pre(kv, num_fused=2)
             if self.qk_rms_norm:
@@ -136,6 +136,6 @@ class SparseMultiHeadAttention(nn.Module):
                 h = sparse_scaled_dot_product_attention(q, k, v)
             else:
                 h = sparse_scaled_dot_product_attention(q, kv)
-        h = self._reshape_chs(h, (-1,))
+        h = self._reshape_chs(h, (self.channels,))
         h = self._linear(self.to_out, h)
         return h
