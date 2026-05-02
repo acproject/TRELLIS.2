@@ -120,6 +120,7 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             assert len(q.shape) == 4, f"Invalid shape for q, got {q.shape}, expected [N, L, H, C]"
             s = None
             N, L, H, C = q.shape
+            out_dim = C
             q_seqlen = [L] * N
             q = q.reshape(N * L, H, C)   # [T_Q, H, C]
 
@@ -152,6 +153,7 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             assert len(q.shape) == 4, f"Invalid shape for q, got {q.shape}, expected [N, L, H, Ci]"
             s = None
             N, L, H, CI = q.shape
+            out_dim = v.shape[-1]
             q_seqlen = [L] * N
             q = q.reshape(N * L, H, CI)  # [T_Q, H, Ci]
 
@@ -252,4 +254,4 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
     if s is not None:
         return s.replace(out)
     else:
-        return out.reshape(N, L, H, -1)
+        return out.reshape(N, L, H, out_dim)

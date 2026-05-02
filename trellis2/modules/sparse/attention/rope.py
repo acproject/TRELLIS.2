@@ -27,9 +27,9 @@ class SparseRotaryPositionEmbedder(nn.Module):
         return phases
         
     def _rotary_embedding(self, x: torch.Tensor, phases: torch.Tensor) -> torch.Tensor:
-        x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+        x_complex = torch.view_as_complex(x.float().reshape(*x.shape[:-1], self.head_dim // 2, 2))
         x_rotated = x_complex * phases.unsqueeze(-2)
-        x_embed = torch.view_as_real(x_rotated).reshape(*x_rotated.shape[:-1], -1).to(x.dtype)
+        x_embed = torch.view_as_real(x_rotated).reshape(*x_rotated.shape[:-1], self.head_dim).to(x.dtype)
         return x_embed
         
     def forward(self, q: SparseTensor, k: Optional[SparseTensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -43,7 +43,7 @@ class SparseRotaryPositionEmbedder(nn.Module):
         phases = q.get_spatial_cache(phases_cache_name)
         if phases is None:
             coords = q.coords[..., 1:]
-            phases = self._get_phases(coords.reshape(-1)).reshape(*coords.shape[:-1], -1)
+            phases = self._get_phases(coords.reshape(-1)).reshape(*coords.shape[:-1], self.freq_dim)
             if phases.shape[-1] < self.head_dim // 2:
                 padn = self.head_dim // 2 - phases.shape[-1]
                 phases = torch.cat([phases, torch.polar(
