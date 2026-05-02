@@ -97,6 +97,13 @@ class SparseMultiHeadAttention(nn.Module):
         return x.replace(x_feats.squeeze(0)) if isinstance(x, VarLenTensor) else x_feats
     
     def forward(self, x: SparseTensor, context: Optional[Union[VarLenTensor, torch.Tensor]] = None) -> SparseTensor:
+        if x.feats.numel() == 0:
+            out_feats = x.feats.new_zeros(0, self.channels)
+            if self._type == "cross" and context is not None:
+                batch_size = context.shape[0]
+            else:
+                batch_size = x.shape[0]
+            return SparseTensor(out_feats, x.coords, shape=torch.Size([batch_size, self.channels]), scale=x._scale, spatial_cache=x._spatial_cache)
         if self._type == "self":
             qkv = self._linear(self.to_qkv, x)
             qkv = self._fused_pre(qkv, num_fused=3)

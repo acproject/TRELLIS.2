@@ -400,6 +400,8 @@ class SparseTensor(VarLenTensor):
                     spatial_shape = list(coords.max(dim=0).values + 1)
                 else:
                     spatial_shape = [0] * coords.shape[1]
+                    if shape is not None and len(shape) > 0:
+                        spatial_shape[0] = shape[0]
                 self.data = self.SparseTensorData(feats.reshape(feats.shape[0], -1), coords, spatial_shape[1:], spatial_shape[0], **kwargs)
                 self.data._features = feats
             else:

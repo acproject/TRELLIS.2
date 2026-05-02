@@ -108,7 +108,9 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
         assert isinstance(q, VarLenTensor) and isinstance(kv, (VarLenTensor, torch.Tensor)) or \
                isinstance(q, torch.Tensor) and isinstance(kv, VarLenTensor), \
                f"Invalid types, got {type(q)} and {type(kv)}"
-        assert q.shape[0] == kv.shape[0], f"Batch size mismatch, got {q.shape[0]} and {kv.shape[0]}"
+        q_is_empty_varlen = isinstance(q, VarLenTensor) and q.feats.numel() == 0 and q.shape[0] != kv.shape[0]
+        if not q_is_empty_varlen:
+            assert q.shape[0] == kv.shape[0], f"Batch size mismatch, got {q.shape[0]} and {kv.shape[0]}"
         device = q.device
 
         if isinstance(q, VarLenTensor):
@@ -134,6 +136,9 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             kv_seqlen = [L] * N
             kv = kv.reshape(N * L, 2, H, C)   # [T_KV, 2, H, C]
 
+        if q_is_empty_varlen and len(q_seqlen) == 0 and len(kv_seqlen) > 0:
+            q_seqlen = [0] * len(kv_seqlen)
+
     elif num_all_args == 3:
         q = args[0] if len(args) > 0 else kwargs['q']
         k = args[1] if len(args) > 1 else kwargs['k']
@@ -141,7 +146,9 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
         assert isinstance(q, VarLenTensor) and isinstance(k, (VarLenTensor, torch.Tensor)) and type(k) == type(v) or \
                isinstance(q, torch.Tensor) and isinstance(k, VarLenTensor) and isinstance(v, VarLenTensor), \
                f"Invalid types, got {type(q)}, {type(k)}, and {type(v)}"
-        assert q.shape[0] == k.shape[0] == v.shape[0], f"Batch size mismatch, got {q.shape[0]}, {k.shape[0]}, and {v.shape[0]}"
+        q_is_empty_varlen = isinstance(q, VarLenTensor) and q.feats.numel() == 0 and (q.shape[0] != k.shape[0] or q.shape[0] != v.shape[0])
+        if not q_is_empty_varlen:
+            assert q.shape[0] == k.shape[0] == v.shape[0], f"Batch size mismatch, got {q.shape[0]}, {k.shape[0]}, and {v.shape[0]}"
         device = q.device
 
         if isinstance(q, VarLenTensor):
@@ -170,6 +177,9 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             kv_seqlen = [L] * N
             k = k.reshape(N * L, H, CI)     # [T_KV, H, Ci]
             v = v.reshape(N * L, H, CO)     # [T_KV, H, Co]
+
+        if q_is_empty_varlen and len(q_seqlen) == 0 and len(kv_seqlen) > 0:
+            q_seqlen = [0] * len(kv_seqlen)
 
     if config.ATTN == 'xformers':
         if 'xops' not in globals():
@@ -252,6 +262,9 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
         raise ValueError(f"Unknown attention module: {config.ATTN}")
     
     if s is not None:
+        if len(s.layout) == 0 and len(q_seqlen) > 0:
+            out_layout = VarLenTensor.layout_from_seqlen(q_seqlen)
+            return VarLenTensor(out, layout=out_layout)
         return s.replace(out)
     else:
         return out.reshape(N, L, H, out_dim)
