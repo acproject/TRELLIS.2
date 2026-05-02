@@ -239,7 +239,8 @@ class SparseStructureFlowModel(nn.Module):
         for block in self.blocks:
             h = block(h, t_emb, cond, self.rope_phases)
         h = manual_cast(h, x.dtype)
-        h = F.layer_norm(h, h.shape[-1:])
+        if h.numel() > 0:
+            h = F.layer_norm(h, h.shape[-1:])
         h = self.out_layer(h)
 
         h = h.permute(0, 2, 1).view(h.shape[0], h.shape[2], *[self.resolution] * 3).contiguous()

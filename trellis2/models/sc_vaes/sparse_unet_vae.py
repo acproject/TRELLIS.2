@@ -40,9 +40,9 @@ class SparseResBlock3d(nn.Module):
         if resample_mode == 'nearest':
             self.skip_connection = sp.SparseLinear(channels, self.out_channels) if channels != self.out_channels else nn.Identity()
         elif resample_mode =='spatial2channel' and self.downsample:
-            self.skip_connection = lambda x: x.replace(x.feats.reshape(x.feats.shape[0], out_channels, channels * 8 // out_channels).mean(dim=-1))
+            self.skip_connection = lambda x: x.replace(x.feats.reshape(x.feats.shape[0], out_channels, channels * 8 // out_channels).mean(dim=-1)) if x.feats.numel() > 0 else x.replace(x.feats.new_zeros(0, out_channels))
         elif resample_mode =='spatial2channel' and not self.downsample:
-            self.skip_connection = lambda x: x.replace(x.feats.repeat_interleave(out_channels // (channels // 8), dim=1))
+            self.skip_connection = lambda x: x.replace(x.feats.repeat_interleave(out_channels // (channels // 8), dim=1)) if x.feats.numel() > 0 else x.replace(x.feats.new_zeros(0, out_channels))
         self.updown = None
         if self.downsample:
             if resample_mode == 'nearest':
@@ -192,7 +192,7 @@ class SparseResBlockS2C3d(nn.Module):
         self.norm2 = LayerNorm32(self.out_channels, elementwise_affine=False, eps=1e-6)
         self.conv1 = sp.SparseConv3d(channels, self.out_channels // 8, 3)
         self.conv2 = zero_module(sp.SparseConv3d(self.out_channels, self.out_channels, 3))
-        self.skip_connection = lambda x: x.replace(x.feats.reshape(x.feats.shape[0], out_channels, channels * 8 // out_channels).mean(dim=-1))
+        self.skip_connection = lambda x: x.replace(x.feats.reshape(x.feats.shape[0], out_channels, channels * 8 // out_channels).mean(dim=-1)) if x.feats.numel() > 0 else x.replace(x.feats.new_zeros(0, out_channels))
         self.updown = sp.SparseSpatial2Channel(2)
 
     def _forward(self, x: sp.SparseTensor) -> sp.SparseTensor:
@@ -232,7 +232,7 @@ class SparseResBlockC2S3d(nn.Module):
         self.norm2 = LayerNorm32(self.out_channels, elementwise_affine=False, eps=1e-6)
         self.conv1 = sp.SparseConv3d(channels, self.out_channels * 8, 3)
         self.conv2 = zero_module(sp.SparseConv3d(self.out_channels, self.out_channels, 3))
-        self.skip_connection = lambda x: x.replace(x.feats.repeat_interleave(out_channels // (channels // 8), dim=1))
+        self.skip_connection = lambda x: x.replace(x.feats.repeat_interleave(out_channels // (channels // 8), dim=1)) if x.feats.numel() > 0 else x.replace(x.feats.new_zeros(0, out_channels))
         if pred_subdiv:
             self.to_subdiv = sp.SparseLinear(channels, 8)
         self.updown = sp.SparseChannel2Spatial(2)
@@ -377,7 +377,8 @@ class SparseUnetVaeEncoder(nn.Module):
             for j, block in enumerate(res):
                 h = block(h)
         h = h.type(x.dtype)
-        h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
+        if h.feats.numel() > 0:
+            h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
         h = self.to_latent(h)
         
         # Sample from the posterior distribution
@@ -496,7 +497,8 @@ class SparseUnetVaeDecoder(nn.Module):
                 else:
                     h = block(h)
         h = h.type(x.dtype)
-        h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
+        if h.feats.numel() > 0:
+            h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
         h = self.output_layer(h)
         if self.training and self.pred_subdiv:
             return h, subs_gt, subs

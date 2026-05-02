@@ -5,6 +5,8 @@ from .utils import manual_cast
 
 class LayerNorm32(nn.LayerNorm):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.numel() == 0:
+            return x
         x_dtype = x.dtype
         x = manual_cast(x, torch.float32)
         o = super().forward(x)
@@ -16,6 +18,8 @@ class GroupNorm32(nn.GroupNorm):
     A GroupNorm layer that converts to float32 before the forward pass.
     """
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.numel() == 0:
+            return x
         x_dtype = x.dtype
         x = manual_cast(x, torch.float32)
         o = super().forward(x)
@@ -24,6 +28,8 @@ class GroupNorm32(nn.GroupNorm):
     
 class ChannelLayerNorm32(LayerNorm32):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.numel() == 0:
+            return x
         DIM = x.dim()
         x = x.permute(0, *range(2, DIM), 1).contiguous()
         x = super().forward(x)

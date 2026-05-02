@@ -194,7 +194,8 @@ class SLatFlowModel(nn.Module):
             h = block(h, t_emb, cond)
 
         h = manual_cast(h, x.dtype)
-        h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
+        if h.feats.numel() > 0:
+            h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
         h = self.out_layer(h)
         return h
 

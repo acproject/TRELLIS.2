@@ -16,7 +16,8 @@ class SparseSpatial2Channel(nn.Module):
     def forward(self, x: SparseTensor) -> SparseTensor:
         DIM = x.coords.shape[-1] - 1
         if x.feats.numel() == 0:
-            out = SparseTensor(x.feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] * self.factor ** DIM]))
+            new_feats = x.feats.new_zeros(0, x.feats.shape[1] * self.factor ** DIM)
+            out = SparseTensor(new_feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] * self.factor ** DIM]))
             out._scale = tuple([s * self.factor for s in x._scale])
             out._spatial_cache = x._spatial_cache
             return out
@@ -72,7 +73,8 @@ class SparseChannel2Spatial(nn.Module):
     def forward(self, x: SparseTensor, subdivision: Optional[SparseTensor] = None) -> SparseTensor:
         DIM = x.coords.shape[-1] - 1
         if x.feats.numel() == 0:
-            out = SparseTensor(x.feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] // self.factor ** DIM]))
+            new_feats = x.feats.new_zeros(0, x.feats.shape[1] // self.factor ** DIM)
+            out = SparseTensor(new_feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] // self.factor ** DIM]))
             out._scale = tuple([s / self.factor for s in x._scale])
             return out
 
