@@ -136,25 +136,30 @@ def image_to_3d(image, seed, resolution, ss_guidance_strength, ss_guidance_resca
                 tex_slat_guidance_strength, tex_slat_guidance_rescale,
                 tex_slat_sampling_steps, tex_slat_rescale_t, req: gr.Request,
                 progress=gr.Progress(track_tqdm=True)):
-    outputs, latents = pipeline.run(
-        image, seed=seed, preprocess_image=False,
-        sparse_structure_sampler_params={
-            "steps": ss_sampling_steps, "guidance_strength": ss_guidance_strength,
-            "guidance_rescale": ss_guidance_rescale, "rescale_t": ss_rescale_t,
-        },
-        shape_slat_sampler_params={
-            "steps": shape_slat_sampling_steps, "guidance_strength": shape_slat_guidance_strength,
-            "guidance_rescale": shape_slat_guidance_rescale, "rescale_t": shape_slat_rescale_t,
-        },
-        tex_slat_sampler_params={
-            "steps": tex_slat_sampling_steps, "guidance_strength": tex_slat_guidance_strength,
-            "guidance_rescale": tex_slat_guidance_rescale, "rescale_t": tex_slat_rescale_t,
-        },
-        pipeline_type={"512": "512", "1024": "1024_cascade", "1536": "1536_cascade"}[resolution],
-        return_latent=True,
-    )
+    max_retries = 3
+    for attempt in range(max_retries):
+        current_seed = seed + attempt if attempt > 0 else seed
+        outputs, latents = pipeline.run(
+            image, seed=current_seed, preprocess_image=False,
+            sparse_structure_sampler_params={
+                "steps": ss_sampling_steps, "guidance_strength": ss_guidance_strength,
+                "guidance_rescale": ss_guidance_rescale, "rescale_t": ss_rescale_t,
+            },
+            shape_slat_sampler_params={
+                "steps": shape_slat_sampling_steps, "guidance_strength": shape_slat_guidance_strength,
+                "guidance_rescale": shape_slat_guidance_rescale, "rescale_t": shape_slat_rescale_t,
+            },
+            tex_slat_sampler_params={
+                "steps": tex_slat_sampling_steps, "guidance_strength": tex_slat_guidance_strength,
+                "guidance_rescale": tex_slat_guidance_rescale, "rescale_t": tex_slat_rescale_t,
+            },
+            pipeline_type={"512": "512", "1024": "1024_cascade", "1536": "1536_cascade"}[resolution],
+            return_latent=True,
+        )
+        if len(outputs) > 0:
+            break
     if len(outputs) == 0:
-        raise gr.Error("No mesh was generated. The model produced an empty result. Please try a different seed or image.")
+        raise gr.Error("No mesh was generated after multiple attempts. Please try a different seed or image.")
     mesh = outputs[0]
     mesh.simplify(16777216)
     mesh_device = mesh.vertices.device if hasattr(mesh.vertices, 'device') else primary_device
