@@ -271,6 +271,26 @@ class VarLenTensor:
         if isinstance(dim, int):
             dim = (dim,)
         
+        if self.feats.numel() == 0:
+            if dim is None:
+                if op == 'prod':
+                    return torch.ones((), device=self.device, dtype=self.feats.dtype)
+                else:
+                    return torch.zeros((), device=self.device, dtype=self.feats.dtype)
+            batch_size = len(self.layout)
+            feat_shape = list(self.feats.shape)
+            out_shape = list(feat_shape)
+            for d in sorted([d for d in dim if d >= 0], reverse=True):
+                if keepdim:
+                    out_shape[d] = 1
+                else:
+                    out_shape.pop(d)
+            for d in dim:
+                if d == 0:
+                    out_shape[0] = batch_size
+            fill_val = 1.0 if op == 'prod' else 0.0
+            return torch.full(out_shape, fill_val, device=self.device, dtype=self.feats.dtype)
+        
         if op =='mean':
             red = self.feats.mean(dim=dim, keepdim=keepdim)
         elif op =='sum':
