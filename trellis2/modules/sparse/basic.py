@@ -186,7 +186,10 @@ class VarLenTensor:
             mask (torch.BoolTensor): (N, L) mask indicating valid positions
         """
         N = len(self)
-        L = max_length or self.seqlen.max().item()
+        if self.seqlen.numel() > 0:
+            L = max_length or self.seqlen.max().item()
+        else:
+            L = max_length or 0
         spatial = self.feats.shape[1:]
         idx = torch.arange(L, device=self.device).unsqueeze(0).expand(N, L)
         mask = (idx < self.seqlen.unsqueeze(1))
@@ -393,7 +396,10 @@ class SparseTensor(VarLenTensor):
             if config.CONV == 'torchsparse':
                 self.data = self.SparseTensorData(feats, coords, **kwargs)
             elif config.CONV == 'spconv':
-                spatial_shape = list(coords.max(0)[0] + 1)
+                if coords.numel() > 0:
+                    spatial_shape = list(coords.max(dim=0).values + 1)
+                else:
+                    spatial_shape = [0] * coords.shape[1]
                 self.data = self.SparseTensorData(feats.reshape(feats.shape[0], -1), coords, spatial_shape[1:], spatial_shape[0], **kwargs)
                 self.data._features = feats
             else:
@@ -460,7 +466,10 @@ class SparseTensor(VarLenTensor):
         
     def __cal_shape(self, feats, coords):
         shape = []
-        shape.append(coords[:, 0].max().item() + 1)
+        if coords.numel() > 0:
+            shape.append(coords[:, 0].max(dim=0).values.item() + 1)
+        else:
+            shape.append(0)
         shape.extend([*feats.shape[1:]])
         return torch.Size(shape)
     
@@ -471,7 +480,10 @@ class SparseTensor(VarLenTensor):
         return layout
     
     def __cal_spatial_shape(self, coords):
-        return torch.Size((coords[:, 1:].max(0)[0] + 1).tolist())
+        if coords.numel() > 0:
+            return torch.Size((coords[:, 1:].max(dim=0).values + 1).tolist())
+        else:
+            return torch.Size([0] * (coords.shape[1] - 1))
     
     @property
     def shape(self) -> torch.Size:

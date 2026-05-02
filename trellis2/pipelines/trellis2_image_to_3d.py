@@ -163,7 +163,10 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         if isinstance(data, torch.Tensor):
             return data.to(device)
         elif isinstance(data, SparseTensor):
-            return data.to(device)
+            moved = data.to(device)
+            if hasattr(self, '_multi_gpu') and self._multi_gpu:
+                moved.clear_spatial_cache()
+            return moved
         elif isinstance(data, dict):
             return {k: self._move_to_device(v, device) for k, v in data.items()}
         elif isinstance(data, (list, tuple)):

@@ -187,8 +187,12 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             q, k, v = qkv.unbind(dim=1)
         elif num_all_args == 2:
             k, v = kv.unbind(dim=1)
-        # Build attention mask for variable length sequences
         batch_size = len(q_seqlen)
+        if batch_size == 0:
+            if s is not None:
+                return s.replace(torch.zeros(0, q.shape[-2], q.shape[-1], device=device, dtype=q.dtype))
+            else:
+                return torch.zeros(0, len(q_seqlen), q.shape[-2], q.shape[-1], device=device, dtype=q.dtype)
         max_q_len = max(q_seqlen)
         max_kv_len = max(kv_seqlen)
         # Create causal mask for each sequence

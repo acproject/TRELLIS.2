@@ -60,9 +60,13 @@ def calc_window_partition(
             'seq_lens': seq_lens
         }
     elif config.ATTN == 'flash_attn':
+        if seq_lens.numel() > 0:
+            max_seqlen = torch.max(seq_lens)
+        else:
+            max_seqlen = torch.tensor(0, device=tensor.device)
         attn_func_args = {
             'cu_seqlens': torch.cat([torch.tensor([0], device=tensor.device), torch.cumsum(seq_lens, dim=0)], dim=0).int(),
-            'max_seqlen': torch.max(seq_lens)
+            'max_seqlen': max_seqlen
         }
 
     return fwd_indices, bwd_indices, seq_lens, attn_func_args
@@ -119,12 +123,16 @@ def sparse_windowed_scaled_dot_product_self_attention(
         H = q.shape[-2]
         C = q.shape[-1]
         seq_lens = attn_func_args['seq_lens']
-        batch_size = len(seq_lens)
-        max_len = max(seq_lens)
+        batch_size = seq_lens.shape[0] if seq_lens.numel() > 0 else 0
+        if batch_size == 0:
+            out = torch.zeros(0, H, C, device=qkv_feats.device, dtype=qkv_feats.dtype)
+            out = out[bwd_indices]
+            return qkv.replace(out)
+        max_len = seq_lens.max().item()
         attn_mask = torch.zeros(batch_size, max_len, max_len, device=qkv_feats.device, dtype=q.dtype)
         start = 0
         for i in range(batch_size):
-            seq_len = seq_lens[i]
+            seq_len = seq_lens[i].item()
             attn_mask[i, :seq_len, :seq_len] = 1
             start += seq_len
         q = q.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
@@ -188,7 +196,7 @@ def sparse_windowed_scaled_dot_product_cross_attention(
     else:
         kv_fwd_indices, kv_bwd_indices, kv_seq_lens, kv_attn_func_args = kv_serialization_spatial_cache
 
-    assert len(q_seq_lens) == len(kv_seq_lens), "Number of sequences in q and kv must match"
+    assert q_seq_lens.shape[0] == kv_seq_lens.shape[0], "Number of sequences in q and kv must match"
 
     q_feats = q.feats[q_fwd_indices]      # [M, H, C]
     kv_feats = kv.feats[kv_fwd_indices]    # [M, 2, H, C]
@@ -207,12 +215,16 @@ def sparse_windowed_scaled_dot_product_cross_attention(
         k, v = kv_feats.unbind(dim=1)                                                   # [M, H, C]
         H = q_feats.shape[-2]
         CO = v.shape[-1]
-        batch_size = len(q_seq_lens)
-        max_q_len = max(q_seq_lens)
-        max_kv_len = max(kv_seq_lens)
+        batch_size = q_seq_lens.shape[0] if q_seq_lens.numel() > 0 else 0
+        if batch_size == 0:
+            out = torch.zeros(0, H, CO, device=q_feats.device, dtype=q_feats.dtype)
+            out = out[q_bwd_indices]
+            return q.replace(out)
+        max_q_len = q_seq_lens.max().item()
+        max_kv_len = kv_seq_lens.max().item()
         attn_mask = torch.zeros(batch_size, max_q_len, max_kv_len, device=q_feats.device, dtype=q_feats.dtype)
         for i in range(batch_size):
-            attn_mask[i, :q_seq_lens[i], :kv_seq_lens[i]] = 1
+            attn_mask[i, :q_seq_lens[i].item(), :kv_seq_lens[i].item()] = 1
         q = q_feats.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
         k = k.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
         v = v.reshape(batch_size, -1, H, CO).permute(0, 2, 1, 3)
