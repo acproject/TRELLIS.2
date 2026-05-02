@@ -219,6 +219,8 @@ def flexible_dual_grid_to_mesh(
 
     # Extract mesh
     N = dual_vertices.shape[0]
+    if N == 0:
+        return coords.new_zeros(0, 3), coords.new_zeros(0, 3, dtype=torch.long)
     mesh_vertices = (coords.float() + dual_vertices) / (2 * N) - 0.5
 
     # Store active voxels into hashmap

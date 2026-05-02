@@ -33,6 +33,8 @@ class Mesh:
         return self.to('cpu')
     
     def fill_holes(self, max_hole_perimeter=3e-2):
+        if self.vertices.shape[0] == 0 or self.faces.shape[0] == 0:
+            return
         vertices = self.vertices.to(self.device)
         faces = self.faces.to(self.device)
         
@@ -57,6 +59,8 @@ class Mesh:
         self.faces = new_faces.to(self.device)
         
     def remove_faces(self, face_mask: torch.Tensor):
+        if self.vertices.shape[0] == 0 or self.faces.shape[0] == 0:
+            return
         vertices = self.vertices.to(self.device)
         faces = self.faces.to(self.device)
         
@@ -69,6 +73,8 @@ class Mesh:
         self.faces = new_faces.to(self.device)
         
     def simplify(self, target=1000000, verbose: bool=False, options: dict={}):
+        if self.vertices.shape[0] == 0 or self.faces.shape[0] == 0:
+            return
         vertices = self.vertices.to(self.device)
         faces = self.faces.to(self.device)
         

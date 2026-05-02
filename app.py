@@ -399,6 +399,8 @@ def image_to_3d(
         }[resolution],
         return_latent=True,
     )
+    if len(outputs) == 0:
+        raise gr.Error("No mesh was generated. The model produced an empty result. Please try a different seed or image.")
     mesh = outputs[0]
     mesh.simplify(16777216) # nvdiffrast limit
     images = render_utils.render_snapshot(mesh, resolution=1024, r=2, fov=36, nviews=STEPS, envmap=envmap)
@@ -491,7 +493,10 @@ def extract_glb(
     """
     user_dir = os.path.join(TMP_DIR, str(req.session_hash))
     shape_slat, tex_slat, res = unpack_state(state)
-    mesh = pipeline.decode_latent(shape_slat, tex_slat, res)[0]
+    meshes = pipeline.decode_latent(shape_slat, tex_slat, res)
+    if len(meshes) == 0:
+        raise gr.Error("No mesh was generated. The model produced an empty result.")
+    mesh = meshes[0]
     glb = o_voxel.postprocess.to_glb(
         vertices=mesh.vertices,
         faces=mesh.faces,

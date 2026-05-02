@@ -544,6 +544,8 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         tex_voxels = self.decode_tex_slat(tex_slat, subs)
         out_mesh = []
         for m, v in zip(meshes, tex_voxels):
+            if m.vertices.shape[0] == 0 or m.faces.shape[0] == 0:
+                continue
             m.fill_holes()
             out_mesh.append(
                 MeshWithVoxel(

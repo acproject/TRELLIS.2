@@ -153,6 +153,8 @@ def image_to_3d(image, seed, resolution, ss_guidance_strength, ss_guidance_resca
         pipeline_type={"512": "512", "1024": "1024_cascade", "1536": "1536_cascade"}[resolution],
         return_latent=True,
     )
+    if len(outputs) == 0:
+        raise gr.Error("No mesh was generated. The model produced an empty result. Please try a different seed or image.")
     mesh = outputs[0]
     mesh.simplify(16777216)
     mesh_device = mesh.vertices.device if hasattr(mesh.vertices, 'device') else primary_device
@@ -197,7 +199,10 @@ def image_to_3d(image, seed, resolution, ss_guidance_strength, ss_guidance_resca
 def extract_glb(state, decimation_target, texture_size, req: gr.Request, progress=gr.Progress(track_tqdm=True)):
     user_dir = os.path.join(TMP_DIR, str(req.session_hash))
     shape_slat, tex_slat, res = unpack_state(state)
-    mesh = pipeline.decode_latent(shape_slat, tex_slat, res)[0]
+    meshes = pipeline.decode_latent(shape_slat, tex_slat, res)
+    if len(meshes) == 0:
+        raise gr.Error("No mesh was generated. The model produced an empty result.")
+    mesh = meshes[0]
     glb = o_voxel.postprocess.to_glb(
         vertices=mesh.vertices, faces=mesh.faces, attr_volume=mesh.attrs,
         coords=mesh.coords, attr_layout=pipeline.pbr_attr_layout, grid_size=res,

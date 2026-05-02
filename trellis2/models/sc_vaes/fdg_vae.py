@@ -84,6 +84,8 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
         decoded = super().forward(x, **kwargs)
         if self.training:
             h, subs_gt, subs = decoded
+            if h.feats.numel() == 0:
+                return [], h.replace(h.feats.new_zeros(0, 6)), h.replace(h.feats.new_zeros(0, 6)), subs_gt, subs
             vertices = h.replace((1 + 2 * self.voxel_margin) * F.sigmoid(h.feats[..., 0:3]) - self.voxel_margin)
             intersected_logits = h.replace(h.feats[..., 3:6])
             quad_lerp = h.replace(F.softplus(h.feats[..., 6:7]))
@@ -97,6 +99,16 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
         else:
             out_list = list(decoded) if isinstance(decoded, tuple) else [decoded]
             h = out_list[0]
+            if h.feats.numel() == 0:
+                empty_mesh = Mesh(
+                    torch.zeros(0, 3, device=h.device),
+                    torch.zeros(0, 3, device=h.device, dtype=torch.int),
+                )
+                if len(out_list) == 1:
+                    return [empty_mesh]
+                else:
+                    out_list[0] = [empty_mesh]
+                    return tuple(out_list)
             vertices = h.replace((1 + 2 * self.voxel_margin) * F.sigmoid(h.feats[..., 0:3]) - self.voxel_margin)
             intersected = h.replace(h.feats[..., 3:6] > 0)
             quad_lerp = h.replace(F.softplus(h.feats[..., 6:7]))
