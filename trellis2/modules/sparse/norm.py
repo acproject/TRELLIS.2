@@ -17,6 +17,8 @@ class SparseGroupNorm(nn.GroupNorm):
         super(SparseGroupNorm, self).__init__(num_groups, num_channels, eps, affine)
 
     def forward(self, input: VarLenTensor) -> VarLenTensor:
+        if input.feats.numel() == 0:
+            return input.replace(torch.zeros_like(input.feats))
         nfeats = torch.zeros_like(input.feats)
         for k in range(input.shape[0]):
             bfeats = input.feats[input.layout[k]]
@@ -32,6 +34,8 @@ class SparseLayerNorm(nn.LayerNorm):
         super(SparseLayerNorm, self).__init__(normalized_shape, eps, elementwise_affine)
 
     def forward(self, input: VarLenTensor) -> VarLenTensor:
+        if input.feats.numel() == 0:
+            return input.replace(torch.zeros_like(input.feats))
         nfeats = torch.zeros_like(input.feats)
         for k in range(input.shape[0]):
             bfeats = input.feats[input.layout[k]]

@@ -20,6 +20,9 @@ def sparse_conv3d_init(self, in_channels, out_channels, kernel_size, stride=1, d
 
 
 def sparse_conv3d_forward(self, x: SparseTensor) -> SparseTensor:
+    if x.feats.numel() == 0:
+        out_feats = x.feats.new_zeros(0, self.conv.out_channels)
+        return x.replace(out_feats)
     spatial_changed = any(s != 1 for s in self.stride) or (self.padding is not None)
     new_data = self.conv(x.data)
     new_shape = [x.shape[0], self.conv.out_channels]
@@ -53,6 +56,9 @@ def sparse_inverse_conv3d_init(self, in_channels, out_channels, kernel_size, str
 
 
 def sparse_inverse_conv3d_forward(self, x: SparseTensor) -> SparseTensor:
+    if x.feats.numel() == 0:
+        out_feats = x.feats.new_zeros(0, self.conv.out_channels)
+        return x.replace(out_feats)
     spatial_changed = any(s != 1 for s in self.stride)
     if spatial_changed:
         # recover the original spconv order

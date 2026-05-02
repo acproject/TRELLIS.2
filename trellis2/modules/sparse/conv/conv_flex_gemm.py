@@ -35,6 +35,10 @@ def sparse_conv3d_init(self, in_channels, out_channels, kernel_size, stride=1, d
 
 
 def sparse_conv3d_forward(self, x: SparseTensor) -> SparseTensor:
+    if x.feats.numel() == 0:
+        out_feats = x.feats.new_zeros(0, self.out_channels)
+        return x.replace(out_feats)
+
     flex_gemm.ops.spconv.set_algorithm(config.FLEX_GEMM_ALGO)
     flex_gemm.ops.spconv.set_hashmap_ratio(config.FLEX_GEMM_HASHMAP_RATIO)
 

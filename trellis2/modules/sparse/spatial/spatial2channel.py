@@ -15,6 +15,11 @@ class SparseSpatial2Channel(nn.Module):
 
     def forward(self, x: SparseTensor) -> SparseTensor:
         DIM = x.coords.shape[-1] - 1
+        if x.feats.numel() == 0:
+            out = SparseTensor(x.feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] * self.factor ** DIM]))
+            out._scale = tuple([s * self.factor for s in x._scale])
+            out._spatial_cache = x._spatial_cache
+            return out
         cache = x.get_spatial_cache(f'spatial2channel_{self.factor}')
         if cache is None:
             coord = list(x.coords.unbind(dim=-1))
@@ -66,6 +71,10 @@ class SparseChannel2Spatial(nn.Module):
 
     def forward(self, x: SparseTensor, subdivision: Optional[SparseTensor] = None) -> SparseTensor:
         DIM = x.coords.shape[-1] - 1
+        if x.feats.numel() == 0:
+            out = SparseTensor(x.feats, x.coords, None if x._shape is None else torch.Size([x._shape[0], x._shape[1] // self.factor ** DIM]))
+            out._scale = tuple([s / self.factor for s in x._scale])
+            return out
 
         cache = x.get_spatial_cache(f'channel2spatial_{self.factor}')
         if cache is None:

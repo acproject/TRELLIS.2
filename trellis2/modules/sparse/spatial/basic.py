@@ -21,6 +21,11 @@ class SparseDownsample(nn.Module):
         assert self.mode in ['mean', 'max'], f'Invalid mode: {self.mode}'
 
     def forward(self, x: SparseTensor) -> SparseTensor:
+        if x.feats.numel() == 0:
+            out = SparseTensor(x.feats, x.coords, x._shape)
+            out._scale = tuple([s * self.factor for s in x._scale])
+            out._spatial_cache = x._spatial_cache
+            return out
         cache = x.get_spatial_cache(f'downsample_{self.factor}')
         if cache is None:
             DIM = x.coords.shape[-1] - 1
@@ -80,6 +85,10 @@ class SparseUpsample(nn.Module):
         self.factor = factor
 
     def forward(self, x: SparseTensor, subdivision: Optional[SparseTensor] = None) -> SparseTensor:
+        if x.feats.numel() == 0:
+            out = SparseTensor(x.feats, x.coords, x._shape)
+            out._scale = tuple([s / self.factor for s in x._scale])
+            return out
         DIM = x.coords.shape[-1] - 1
 
         cache = x.get_spatial_cache(f'upsample_{self.factor}')
