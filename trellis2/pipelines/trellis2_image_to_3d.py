@@ -258,7 +258,11 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         target_device = self._get_device_of_model(flow_model)
         noise = torch.randn(num_samples, in_channels, reso, reso, reso).to(target_device)
         cond = self._move_to_device(cond, target_device)
+        print(f"[DIAG] sample_sparse_structure: flow_model device={target_device}, noise.shape={noise.shape}, noise mean/std={noise.mean().item():.4f}/{noise.std().item():.4f}")
+        print(f"[DIAG] sample_sparse_structure: cond device={cond['cond'].device}, cond mean/std={cond['cond'].mean().item():.4f}/{cond['cond'].std().item():.4f}")
+        print(f"[DIAG] sample_sparse_structure: neg_cond device={cond['neg_cond'].device}, neg_cond mean/std={cond['neg_cond'].mean().item():.4f}/{cond['neg_cond'].std().item():.4f}")
         sampler_params = {**self.sparse_structure_sampler_params, **sampler_params}
+        print(f"[DIAG] sample_sparse_structure: sampler_params={sampler_params}")
         if self.low_vram:
             flow_model.to(target_device)
         z_s = self.sparse_structure_sampler.sample(
@@ -269,16 +273,21 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             verbose=True,
             tqdm_desc="Sampling sparse structure",
         ).samples
+        print(f"[DIAG] sample_sparse_structure: z_s.shape={z_s.shape}, z_s device={z_s.device}, z_s min/max/mean={z_s.min().item():.4f}/{z_s.max().item():.4f}/{z_s.mean().item():.4f}")
         if self.low_vram:
             flow_model.cpu()
         
         # Decode sparse structure latent
         decoder = self.models['sparse_structure_decoder']
         target_device = self._get_device_of_model(decoder)
+        print(f"[DIAG] sample_sparse_structure: decoder device={target_device}")
         z_s = z_s.to(target_device)
         if self.low_vram:
             decoder.to(target_device)
-        decoded = decoder(z_s)>0
+        decoded_raw = decoder(z_s)
+        print(f"[DIAG] sample_sparse_structure: decoded_raw.shape={decoded_raw.shape}, min/max/mean={decoded_raw.min().item():.4f}/{decoded_raw.max().item():.4f}/{decoded_raw.mean().item():.4f}")
+        decoded = decoded_raw > 0
+        print(f"[DIAG] sample_sparse_structure: decoded positive voxels={decoded.sum().item()}/{decoded.numel()}")
         if self.low_vram:
             decoder.cpu()
         if resolution != decoded.shape[2]:
