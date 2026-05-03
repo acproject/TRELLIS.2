@@ -81,6 +81,7 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
         self.resolution = resolution
         
     def forward(self, x: sp.SparseTensor, gt_intersected: sp.SparseTensor = None, **kwargs):
+        print(f"[DIAG] FlexiDualGridVaeDecoder.forward: input x.feats.shape={x.feats.shape}, x.coords.shape={x.coords.shape}")
         decoded = super().forward(x, **kwargs)
         if self.training:
             h, subs_gt, subs = decoded
@@ -99,7 +100,13 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
         else:
             out_list = list(decoded) if isinstance(decoded, tuple) else [decoded]
             h = out_list[0]
+            print(f"[DIAG] FlexiDualGridVaeDecoder.forward (eval): h.feats.shape={h.feats.shape}, h.coords.shape={h.coords.shape}")
+            if len(out_list) > 1:
+                subs = out_list[1]
+                for si, sub in enumerate(subs):
+                    print(f"[DIAG]   sub[{si}]: feats.shape={sub.feats.shape}, positive_ratio={(sub.feats > 0).float().mean().item():.4f}")
             if h.feats.numel() == 0:
+                print(f"[DIAG] FlexiDualGridVaeDecoder: h is EMPTY, returning empty mesh")
                 empty_mesh = Mesh(
                     torch.zeros(0, 3, device=h.device),
                     torch.zeros(0, 3, device=h.device, dtype=torch.int),
@@ -111,6 +118,7 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
                     return tuple(out_list)
             vertices = h.replace((1 + 2 * self.voxel_margin) * F.sigmoid(h.feats[..., 0:3]) - self.voxel_margin)
             intersected = h.replace(h.feats[..., 3:6] > 0)
+            print(f"[DIAG]   intersected: positive_ratio={intersected.feats.float().mean().item():.4f}, total={intersected.feats.numel()}")
             quad_lerp = h.replace(F.softplus(h.feats[..., 6:7]))
             mesh = [Mesh(*flexible_dual_grid_to_mesh(
                 v.coords[:, 1:], v.feats, i.feats, q.feats,
@@ -118,5 +126,7 @@ class FlexiDualGridVaeDecoder(SparseUnetVaeDecoder):
                 grid_size=self.resolution,
                 train=False
             )) for v, i, q in zip(vertices, intersected, quad_lerp)]
+            for idx, m in enumerate(mesh):
+                print(f"[DIAG]   mesh[{idx}]: vertices={m.vertices.shape}, faces={m.faces.shape}")
             out_list[0] = mesh
             return out_list[0] if len(out_list) == 1 else tuple(out_list)

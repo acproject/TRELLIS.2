@@ -482,6 +482,7 @@ class SparseUnetVaeDecoder(nn.Module):
         
         h = self.from_latent(x)
         h = h.type(self.dtype)
+        print(f"[DIAG] SparseUnetVaeDecoder.forward: input x.feats.shape={x.feats.shape}, h.feats.shape={h.feats.shape}")
         subs_gt = []
         subs = []
         for i, res in enumerate(self.blocks):
@@ -492,14 +493,17 @@ class SparseUnetVaeDecoder(nn.Module):
                             subs_gt.append(h.get_spatial_cache('subdivision'))
                         h, sub = block(h)
                         subs.append(sub)
+                        print(f"[DIAG]   block[{i}][{j}] (pred_subdiv): h.feats.shape={h.feats.shape}, sub.feats.shape={sub.feats.shape}, sub_positive_ratio={(sub.feats > 0).float().mean().item():.4f}")
                     else:
                         h = block(h, subdiv=guide_subs[i] if guide_subs is not None else None)
                 else:
                     h = block(h)
+            print(f"[DIAG]   after blocks[{i}]: h.feats.shape={h.feats.shape}, h.coords.shape={h.coords.shape}")
         h = h.type(x.dtype)
         if h.feats.numel() > 0:
             h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))
         h = self.output_layer(h)
+        print(f"[DIAG] SparseUnetVaeDecoder.forward: output h.feats.shape={h.feats.shape}, h.coords.shape={h.coords.shape}")
         if self.training and self.pred_subdiv:
             return h, subs_gt, subs
         else:
@@ -513,12 +517,16 @@ class SparseUnetVaeDecoder(nn.Module):
         
         h = self.from_latent(x)
         h = h.type(self.dtype)
+        print(f"[DIAG] SparseUnetVaeDecoder.upsample: input x.feats.shape={x.feats.shape}, upsample_times={upsample_times}")
         for i, res in enumerate(self.blocks):
             if i == upsample_times:
+                print(f"[DIAG] SparseUnetVaeDecoder.upsample: returning h.coords.shape={h.coords.shape}, num_coords={h.coords.shape[0]}")
                 return h.coords
             for j, block in enumerate(res):
                 if i < len(self.blocks) - 1 and j == len(res) - 1:
                     h, sub = block(h)
+                    print(f"[DIAG]   upsample block[{i}][{j}]: h.feats.shape={h.feats.shape}, sub_positive_ratio={(sub.feats > 0).float().mean().item():.4f}")
                 else:
                     h = block(h)
+            print(f"[DIAG]   upsample after blocks[{i}]: h.feats.shape={h.feats.shape}, h.coords.shape={h.coords.shape}")
        

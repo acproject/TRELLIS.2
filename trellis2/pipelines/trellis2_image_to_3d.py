@@ -285,6 +285,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             ratio = decoded.shape[2] // resolution
             decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
         coords = torch.argwhere(decoded)[:, [0, 2, 3, 4]].int()
+        print(f"[DIAG] sample_sparse_structure: coords.shape={coords.shape}, num_voxels={coords.shape[0]}")
 
         return coords
 
@@ -327,6 +328,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         std = torch.tensor(self.shape_slat_normalization['std'])[None].to(slat.device)
         mean = torch.tensor(self.shape_slat_normalization['mean'])[None].to(slat.device)
         slat = slat * std + mean
+        print(f"[DIAG] sample_shape_slat: slat.feats.shape={slat.feats.shape}, slat.coords.shape={slat.coords.shape}")
         
         return slat
     
@@ -382,6 +384,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             shape_decoder.to(target_device)
             shape_decoder.low_vram = True
         hr_coords = shape_decoder.upsample(slat, upsample_times=4)
+        print(f"[DIAG] sample_shape_slat_cascade: hr_coords.shape={hr_coords.shape}, num_hr_voxels={hr_coords.shape[0]}")
         if self.low_vram:
             shape_decoder.cpu()
             shape_decoder.low_vram = False
@@ -452,6 +455,12 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         if self.low_vram:
             shape_decoder.cpu()
             shape_decoder.low_vram = False
+        print(f"[DIAG] decode_shape_slat: ret type={type(ret)}, len={len(ret) if isinstance(ret, tuple) else 'N/A'}")
+        if isinstance(ret, tuple):
+            meshes, subs = ret
+            print(f"[DIAG] decode_shape_slat: meshes len={len(meshes)}, subs len={len(subs)}")
+            for idx, m in enumerate(meshes):
+                print(f"[DIAG]   mesh[{idx}]: vertices={m.vertices.shape}, faces={m.faces.shape}")
         return ret
     
     def sample_tex_slat(
@@ -541,9 +550,11 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             resolution (int): The resolution of the output.
         """
         meshes, subs = self.decode_shape_slat(shape_slat, resolution)
+        print(f"[DIAG] decode_latent: shape_slat.feats.shape={shape_slat.feats.shape}, shape_slat.coords.shape={shape_slat.coords.shape}")
         tex_voxels = self.decode_tex_slat(tex_slat, subs)
         out_mesh = []
         for m, v in zip(meshes, tex_voxels):
+            print(f"[DIAG] decode_latent loop: mesh vertices={m.vertices.shape}, faces={m.faces.shape}")
             if m.vertices.shape[0] == 0 or m.faces.shape[0] == 0:
                 continue
             m.fill_holes()
