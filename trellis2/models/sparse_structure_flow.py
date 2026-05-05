@@ -225,11 +225,6 @@ class SparseStructureFlowModel(nn.Module):
         assert [*x.shape] == [x.shape[0], self.in_channels, *[self.resolution] * 3], \
                 f"Input shape mismatch, got {x.shape}, expected {[x.shape[0], self.in_channels, *[self.resolution] * 3]}"
 
-        print(f"[DIAG] SparseStructureFlowModel.forward: x.device={x.device}, t.device={t.device}, cond.device={cond.device}")
-        _pos_emb = getattr(self, 'pos_emb', None)
-        print(f"[DIAG] SparseStructureFlowModel.forward: model device={self.device}, pos_emb device={_pos_emb.device if _pos_emb is not None else 'None'}")
-        print(f"[DIAG] SparseStructureFlowModel.forward: input_layer.weight mean={self.input_layer.weight.mean().item():.6f}, out_layer.weight mean={self.out_layer.weight.mean().item():.6f}")
-
         h = x.view(*x.shape[:2], -1).permute(0, 2, 1).contiguous()
 
         h = self.input_layer(h)
@@ -250,5 +245,4 @@ class SparseStructureFlowModel(nn.Module):
 
         h = h.permute(0, 2, 1).view(h.shape[0], h.shape[2], *[self.resolution] * 3).contiguous()
 
-        print(f"[DIAG] SparseStructureFlowModel.forward: output h.shape={h.shape}, h min/max/mean={h.min().item():.4f}/{h.max().item():.4f}/{h.mean().item():.4f}")
         return h

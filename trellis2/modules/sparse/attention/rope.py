@@ -43,7 +43,7 @@ class SparseRotaryPositionEmbedder(nn.Module):
         phases = q.get_spatial_cache(phases_cache_name)
         if phases is None:
             coords = q.coords[..., 1:]
-            phases = self._get_phases(coords.reshape(-1)).reshape(*coords.shape[:-1], self.freq_dim)
+            phases = self._get_phases(coords.reshape(-1)).reshape(*coords.shape[:-1], self.dim * self.freq_dim)
             if phases.shape[-1] < self.head_dim // 2:
                 padn = self.head_dim // 2 - phases.shape[-1]
                 phases = torch.cat([phases, torch.polar(

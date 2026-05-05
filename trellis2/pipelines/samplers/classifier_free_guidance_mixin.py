@@ -14,9 +14,6 @@ class ClassifierFreeGuidanceSamplerMixin:
         else:
             pred_pos = super()._inference_model(model, x_t, t, cond, **kwargs)
             pred_neg = super()._inference_model(model, x_t, t, neg_cond, **kwargs)
-            print(f"[DIAG] CFG._inference_model: t={t:.4f}, guidance_strength={guidance_strength}, guidance_rescale={guidance_rescale}")
-            print(f"[DIAG] CFG._inference_model: pred_pos min/max/mean={pred_pos.min().item():.4f}/{pred_pos.max().item():.4f}/{pred_pos.mean().item():.4f}")
-            print(f"[DIAG] CFG._inference_model: pred_neg min/max/mean={pred_neg.min().item():.4f}/{pred_neg.max().item():.4f}/{pred_neg.mean().item():.4f}")
             pred = guidance_strength * pred_pos + (1 - guidance_strength) * pred_neg
             
             # CFG rescale
@@ -29,5 +26,4 @@ class ClassifierFreeGuidanceSamplerMixin:
                 x_0 = guidance_rescale * x_0_rescaled + (1 - guidance_rescale) * x_0_cfg
                 pred = self._xstart_to_pred(x_t, t, x_0)
                 
-            print(f"[DIAG] CFG._inference_model: final pred min/max/mean={pred.min().item():.4f}/{pred.max().item():.4f}/{pred.mean().item():.4f}")
             return pred

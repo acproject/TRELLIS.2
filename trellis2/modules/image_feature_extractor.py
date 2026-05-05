@@ -59,14 +59,10 @@ class DinoV3FeatureExtractor:
     """
     Feature extractor for DINOv3 models.
     """
-    def __init__(self, model_name: str, image_size=512, local_files_only=False):
+    def __init__(self, model_name: str, image_size=512, local_files_only=True):
         self.model_name = model_name
-        if local_files_only:
-            from modelscope import snapshot_download
-            model_path = snapshot_download(model_name, local_files_only=True)
-        else:
-            from modelscope import snapshot_download
-            model_path = snapshot_download(model_name)
+        from modelscope import snapshot_download
+        model_path = snapshot_download(model_name, local_files_only=local_files_only)
         
         from transformers import DINOv3ViTModel
         self.model = DINOv3ViTModel.from_pretrained(model_path)

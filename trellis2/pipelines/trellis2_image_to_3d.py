@@ -146,10 +146,59 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if model is None:
                 continue
             target_device = devices[i % len(devices)]
-            model.to(target_device)
+            self._safe_model_to_device(model, target_device)
             self._model_devices[name] = target_device
 
         self.low_vram = False
+
+    @staticmethod
+    def _safe_model_to_device(model, target_device):
+        """
+        Safely move a model to the target device by saving state_dict on CPU,
+        moving the model, and reloading weights. This avoids weight corruption
+        that can occur with direct .to() calls on models with mixed precision
+        and spconv layers.
+        """
+        if hasattr(model, 'state_dict') and callable(model.state_dict):
+            import copy
+            state_dict = copy.deepcopy({k: v.cpu() for k, v in model.state_dict().items()})
+            model.to(target_device)
+            model.load_state_dict(state_dict, strict=False)
+        else:
+            model.to(target_device)
+
+    def _run_on_primary_gpu(self, model, fn, *args, **kwargs):
+        """
+        Run a function on the primary GPU (cuda:0) to avoid flex_gemm spconv
+        bugs on non-primary GPUs. Temporarily moves the model and data to cuda:0,
+        runs the function, then moves the model back to its original device.
+
+        Args:
+            model: The model to run.
+            fn: The function to call (typically model.__call__).
+            *args, **kwargs: Arguments to pass to the function.
+
+        Returns:
+            The result of the function call.
+        """
+        if not (hasattr(self, '_multi_gpu') and self._multi_gpu):
+            return fn(*args, **kwargs)
+
+        original_device = self._get_device_of_model(model)
+        primary_device = self._devices[0]
+
+        if str(original_device) == str(primary_device):
+            return fn(*args, **kwargs)
+
+        self._safe_model_to_device(model, primary_device)
+        args = tuple(self._move_to_device(a, primary_device) for a in args)
+        kwargs = {k: self._move_to_device(v, primary_device) for k, v in kwargs.items()}
+
+        result = fn(*args, **kwargs)
+
+        self._safe_model_to_device(model, original_device)
+
+        return result
 
     def _get_device_of_model(self, model) -> str:
         if hasattr(self, '_multi_gpu') and self._multi_gpu:
@@ -258,11 +307,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         target_device = self._get_device_of_model(flow_model)
         noise = torch.randn(num_samples, in_channels, reso, reso, reso).to(target_device)
         cond = self._move_to_device(cond, target_device)
-        print(f"[DIAG] sample_sparse_structure: flow_model device={target_device}, noise.shape={noise.shape}, noise mean/std={noise.mean().item():.4f}/{noise.std().item():.4f}")
-        print(f"[DIAG] sample_sparse_structure: cond device={cond['cond'].device}, cond mean/std={cond['cond'].mean().item():.4f}/{cond['cond'].std().item():.4f}")
-        print(f"[DIAG] sample_sparse_structure: neg_cond device={cond['neg_cond'].device}, neg_cond mean/std={cond['neg_cond'].mean().item():.4f}/{cond['neg_cond'].std().item():.4f}")
         sampler_params = {**self.sparse_structure_sampler_params, **sampler_params}
-        print(f"[DIAG] sample_sparse_structure: sampler_params={sampler_params}")
         if self.low_vram:
             flow_model.to(target_device)
         z_s = self.sparse_structure_sampler.sample(
@@ -273,28 +318,22 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             verbose=True,
             tqdm_desc="Sampling sparse structure",
         ).samples
-        print(f"[DIAG] sample_sparse_structure: z_s.shape={z_s.shape}, z_s device={z_s.device}, z_s min/max/mean={z_s.min().item():.4f}/{z_s.max().item():.4f}/{z_s.mean().item():.4f}")
         if self.low_vram:
             flow_model.cpu()
         
         # Decode sparse structure latent
         decoder = self.models['sparse_structure_decoder']
-        target_device = self._get_device_of_model(decoder)
-        print(f"[DIAG] sample_sparse_structure: decoder device={target_device}")
-        z_s = z_s.to(target_device)
         if self.low_vram:
+            target_device = self._get_device_of_model(decoder)
             decoder.to(target_device)
-        decoded_raw = decoder(z_s)
-        print(f"[DIAG] sample_sparse_structure: decoded_raw.shape={decoded_raw.shape}, min/max/mean={decoded_raw.min().item():.4f}/{decoded_raw.max().item():.4f}/{decoded_raw.mean().item():.4f}")
+        decoded_raw = self._run_on_primary_gpu(decoder, decoder, z_s)
         decoded = decoded_raw > 0
-        print(f"[DIAG] sample_sparse_structure: decoded positive voxels={decoded.sum().item()}/{decoded.numel()}")
         if self.low_vram:
             decoder.cpu()
         if resolution != decoded.shape[2]:
             ratio = decoded.shape[2] // resolution
             decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
         coords = torch.argwhere(decoded)[:, [0, 2, 3, 4]].int()
-        print(f"[DIAG] sample_sparse_structure: coords.shape={coords.shape}, num_voxels={coords.shape[0]}")
 
         return coords
 
@@ -337,7 +376,6 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         std = torch.tensor(self.shape_slat_normalization['std'])[None].to(slat.device)
         mean = torch.tensor(self.shape_slat_normalization['mean'])[None].to(slat.device)
         slat = slat * std + mean
-        print(f"[DIAG] sample_shape_slat: slat.feats.shape={slat.feats.shape}, slat.coords.shape={slat.coords.shape}")
         
         return slat
     
@@ -387,13 +425,11 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         
         # Upsample
         shape_decoder = self.models['shape_slat_decoder']
-        target_device = self._get_device_of_model(shape_decoder)
-        slat = self._move_to_device(slat, target_device)
         if self.low_vram:
+            target_device = self._get_device_of_model(shape_decoder)
             shape_decoder.to(target_device)
             shape_decoder.low_vram = True
-        hr_coords = shape_decoder.upsample(slat, upsample_times=4)
-        print(f"[DIAG] sample_shape_slat_cascade: hr_coords.shape={hr_coords.shape}, num_hr_voxels={hr_coords.shape[0]}")
+        hr_coords = self._run_on_primary_gpu(shape_decoder, shape_decoder.upsample, slat, upsample_times=4)
         if self.low_vram:
             shape_decoder.cpu()
             shape_decoder.low_vram = False
@@ -454,22 +490,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             List[SparseTensor]: The decoded substructures.
         """
         shape_decoder = self.models['shape_slat_decoder']
-        target_device = self._get_device_of_model(shape_decoder)
-        slat = self._move_to_device(slat, target_device)
         shape_decoder.set_resolution(resolution)
         if self.low_vram:
+            target_device = self._get_device_of_model(shape_decoder)
             shape_decoder.to(target_device)
             shape_decoder.low_vram = True
-        ret = shape_decoder(slat, return_subs=True)
+        ret = self._run_on_primary_gpu(shape_decoder, shape_decoder, slat, return_subs=True)
         if self.low_vram:
             shape_decoder.cpu()
             shape_decoder.low_vram = False
-        print(f"[DIAG] decode_shape_slat: ret type={type(ret)}, len={len(ret) if isinstance(ret, tuple) else 'N/A'}")
-        if isinstance(ret, tuple):
-            meshes, subs = ret
-            print(f"[DIAG] decode_shape_slat: meshes len={len(meshes)}, subs len={len(subs)}")
-            for idx, m in enumerate(meshes):
-                print(f"[DIAG]   mesh[{idx}]: vertices={m.vertices.shape}, faces={m.faces.shape}")
         return ret
     
     def sample_tex_slat(
@@ -533,12 +562,10 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             SparseTensor: The decoded texture voxels
         """
         tex_decoder = self.models['tex_slat_decoder']
-        target_device = self._get_device_of_model(tex_decoder)
-        slat = self._move_to_device(slat, target_device)
-        subs = self._move_to_device(subs, target_device)
         if self.low_vram:
+            target_device = self._get_device_of_model(tex_decoder)
             tex_decoder.to(target_device)
-        ret = tex_decoder(slat, guide_subs=subs) * 0.5 + 0.5
+        ret = self._run_on_primary_gpu(tex_decoder, tex_decoder, slat, guide_subs=subs) * 0.5 + 0.5
         if self.low_vram:
             tex_decoder.cpu()
         return ret
@@ -559,11 +586,9 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             resolution (int): The resolution of the output.
         """
         meshes, subs = self.decode_shape_slat(shape_slat, resolution)
-        print(f"[DIAG] decode_latent: shape_slat.feats.shape={shape_slat.feats.shape}, shape_slat.coords.shape={shape_slat.coords.shape}")
         tex_voxels = self.decode_tex_slat(tex_slat, subs)
         out_mesh = []
         for m, v in zip(meshes, tex_voxels):
-            print(f"[DIAG] decode_latent loop: mesh vertices={m.vertices.shape}, faces={m.faces.shape}")
             if m.vertices.shape[0] == 0 or m.faces.shape[0] == 0:
                 continue
             m.fill_holes()

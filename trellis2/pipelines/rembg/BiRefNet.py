@@ -8,7 +8,7 @@ from PIL import Image
 
 class BiRefNet:
     def __init__(self, model_name: str = "ZhengPeng7/BiRefNet"):
-        model_path = snapshot_download(model_name)
+        model_path = snapshot_download(model_name, local_files_only=True)
         self.model = AutoModelForImageSegmentation.from_pretrained(
             model_path, trust_remote_code=True
         )
