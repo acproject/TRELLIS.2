@@ -188,11 +188,18 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             q, k, v = qkv.unbind(dim=1)
         elif num_all_args == 2:
             k, v = kv.unbind(dim=1)
+        orig_dtype = q.dtype
+        if orig_dtype == torch.bfloat16 and torch.cuda.is_available() and torch.cuda.get_device_capability(q.device.index or 0) < (8, 0):
+            q = q.to(torch.float16)
+            k = k.to(torch.float16)
+            v = v.to(torch.float16)
         q = q.unsqueeze(0)
         k = k.unsqueeze(0)
         v = v.unsqueeze(0)
-        mask = xops.fmha.BlockDiagonalMask.from_seqlens(q_seqlen, kv_seqlen)
+        mask = xops.fmha.BlockDiagonalMask.from_seqlens(q_seqlen, kv_seqlen).to(device)
         out = xops.memory_efficient_attention(q, k, v, mask)[0]
+        if orig_dtype == torch.bfloat16 and out.dtype != orig_dtype:
+            out = out.to(orig_dtype)
     elif config.ATTN == 'sdpa':
         import torch.nn.functional as F
         if num_all_args == 1:
@@ -205,29 +212,48 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
                 return s.replace(torch.zeros(0, q.shape[-2], q.shape[-1], device=device, dtype=q.dtype))
             else:
                 return torch.zeros(0, len(q_seqlen), q.shape[-2], q.shape[-1], device=device, dtype=q.dtype)
-        max_q_len = max(q_seqlen)
-        max_kv_len = max(kv_seqlen)
-        # Create causal mask for each sequence
-        attn_mask = torch.zeros(batch_size, max_q_len, max_kv_len, device=device, dtype=q.dtype)
-        q_start = 0
-        kv_start = 0
-        for i in range(batch_size):
-            q_len = q_seqlen[i]
-            kv_len = kv_seqlen[i]
-            attn_mask[i, :q_len, :kv_len] = 1
-            q_start += q_len
-            kv_start += kv_len
-        # Reshape to (batch_size * num_heads, seq_len, dim)
         H = q.shape[-2]
         C = q.shape[-1]
-        q = q.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
-        k = k.reshape(batch_size, -1, H, C).permute(0, 2, 1, 3)
-        v = v.reshape(batch_size, -1, H, v.shape[-1]).permute(0, 2, 1, 3)
-        # Apply attention mask
-        attn_mask = attn_mask.unsqueeze(1).repeat(1, H, 1, 1)
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf'))
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-        out = out.permute(0, 2, 1, 3).reshape(-1, H, v.shape[-1])
+        CHUNK_SIZE = 4096
+        if batch_size == 1:
+            q_len = q.shape[0]
+            kv_len = k.shape[0]
+            q_p = q.unsqueeze(0).permute(0, 2, 1, 3)
+            k_p = k.unsqueeze(0).permute(0, 2, 1, 3)
+            v_p = v.unsqueeze(0).permute(0, 2, 1, 3)
+            if q_len <= CHUNK_SIZE:
+                out = F.scaled_dot_product_attention(q_p, k_p, v_p)
+                out = out.permute(0, 2, 1, 3).reshape(-1, H, v.shape[-1])
+            else:
+                out_parts = []
+                for start in range(0, q_len, CHUNK_SIZE):
+                    end = min(start + CHUNK_SIZE, q_len)
+                    qi = q_p[:, :, start:end, :]
+                    oi = F.scaled_dot_product_attention(qi, k_p, v_p)
+                    out_parts.append(oi.permute(0, 2, 1, 3).reshape(-1, H, v.shape[-1]))
+                out = torch.cat(out_parts, dim=0)
+        else:
+            out_parts = []
+            q_offset = 0
+            kv_offset = 0
+            for i in range(batch_size):
+                q_len = q_seqlen[i]
+                kv_len = kv_seqlen[i]
+                qi = q[q_offset:q_offset+q_len].unsqueeze(0).permute(0, 2, 1, 3)
+                ki = k[kv_offset:kv_offset+kv_len].unsqueeze(0).permute(0, 2, 1, 3)
+                vi = v[kv_offset:kv_offset+kv_len].unsqueeze(0).permute(0, 2, 1, 3)
+                if q_len <= CHUNK_SIZE:
+                    oi = F.scaled_dot_product_attention(qi, ki, vi)
+                    out_parts.append(oi.permute(0, 2, 1, 3).reshape(-1, H, vi.shape[-1]))
+                else:
+                    for start in range(0, q_len, CHUNK_SIZE):
+                        end = min(start + CHUNK_SIZE, q_len)
+                        qi_chunk = qi[:, :, start:end, :]
+                        oi_chunk = F.scaled_dot_product_attention(qi_chunk, ki, vi)
+                        out_parts.append(oi_chunk.permute(0, 2, 1, 3).reshape(-1, H, vi.shape[-1]))
+                q_offset += q_len
+                kv_offset += kv_len
+            out = torch.cat(out_parts, dim=0)
     elif config.ATTN == 'flash_attn':
         if 'flash_attn' not in globals():
             import flash_attn
