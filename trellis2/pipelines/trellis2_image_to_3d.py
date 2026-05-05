@@ -190,6 +190,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         if str(original_device) == str(primary_device):
             return fn(*args, **kwargs)
 
+        displaced_models = []
+        for name, m in self.models.items():
+            if m is model:
+                continue
+            m_device = self._get_device_of_model(m)
+            if str(m_device) == str(primary_device):
+                displaced_models.append((name, m, m_device))
+                m.cpu()
+
         self._safe_model_to_device(model, primary_device)
         args = tuple(self._move_to_device(a, primary_device) for a in args)
         kwargs = {k: self._move_to_device(v, primary_device) for k, v in kwargs.items()}
@@ -197,6 +206,9 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         result = fn(*args, **kwargs)
 
         self._safe_model_to_device(model, original_device)
+
+        for name, m, orig_dev in displaced_models:
+            self._safe_model_to_device(m, orig_dev)
 
         return result
 
