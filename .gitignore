@@ -208,3 +208,4 @@ __marimo__/
 my_venv
 .vscode
 .owiseman
+*.glb
